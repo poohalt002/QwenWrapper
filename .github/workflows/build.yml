@@ -1,0 +1,115 @@
+name: Build QwenWrapper IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Create App Bundle Structure
+        run: mkdir -p Payload/QwenWrapper.app
+
+      - name: Write Swift Source
+        run: |
+          cat > QwenWrapper.swift << 'EOF'
+          import UIKit
+          import WebKit
+
+          class AppDelegate: UIResponder, UIApplicationDelegate {
+              var window: UIWindow?
+              
+              func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+                  window = UIWindow(frame: UIScreen.main.bounds)
+                  window?.rootViewController = ViewController()
+                  window?.makeKeyAndVisible()
+                  return true
+              }
+          }
+
+          class ViewController: UIViewController {
+              override func viewDidLoad() {
+                  super.viewDidLoad()
+                  let webView = WKWebView(frame: view.bounds)
+                  webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                  webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
+                  view.addSubview(webView)
+                  if let url = URL(string: "https://chat.qwen.ai/") {
+                      webView.load(URLRequest(url: url))
+                  }
+              }
+          }
+
+          UIApplicationMain(CommandLine.argc, CommandLine.unsafeArgv, nil, NSStringFromClass(AppDelegate.self))
+          EOF
+
+      - name: Compile for iOS arm64
+        run: |
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+          swiftc -sdk "$SDK_PATH" -target arm64-apple-ios15.0 \
+            -framework UIKit -framework WebKit \
+            -o Payload/QwenWrapper.app/QwenWrapper QwenWrapper.swift
+          chmod +x Payload/QwenWrapper.app/QwenWrapper
+
+      - name: Create Info.plist
+        run: |
+          cat > Payload/QwenWrapper.app/Info.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleDevelopmentRegion</key>
+            <string>en</string>
+            <key>CFBundleExecutable</key>
+            <string>QwenWrapper</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.example.qwenwrapper</string>
+            <key>CFBundleInfoDictionaryVersion</key>
+            <string>6.0</string>
+            <key>CFBundleName</key>
+            <string>QwenWrapper</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleShortVersionString</key>
+            <string>1.0</string>
+            <key>CFBundleSupportedPlatforms</key>
+            <array>
+              <string>iPhoneOS</string>
+            </array>
+            <key>CFBundleVersion</key>
+            <string>1</string>
+            <key>LSRequiresIPhoneOS</key>
+            <true/>
+            <key>MinimumOSVersion</key>
+            <string>15.0</string>
+            <key>UIDeviceFamily</key>
+            <array>
+              <integer>1</integer>
+            </array>
+            <key>UISupportedInterfaceOrientations</key>
+            <array>
+              <string>UIInterfaceOrientationPortrait</string>
+              <string>UIInterfaceOrientationLandscapeLeft</string>
+              <string>UIInterfaceOrientationLandscapeRight</string>
+            </array>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Create PkgInfo
+        run: printf 'APPL????' > Payload/QwenWrapper.app/PkgInfo
+
+      - name: Verify Binary Architecture
+        run: |
+          file Payload/QwenWrapper.app/QwenWrapper
+          lipo -info Payload/QwenWrapper.app/QwenWrapper || true
+
+      - name: Package IPA
+        run: zip -r QwenWrapper.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: QwenWrapper-IPA
+          path: QwenWrapper.ipa
+          retention-days: 5
