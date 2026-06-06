@@ -1,4 +1,4 @@
-name: Build QwenWrapper IPA
+name: Build QwenStudio IPA
 
 on:
   workflow_dispatch:
@@ -8,11 +8,11 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Create App Bundle Structure
-        run: mkdir -p Payload/QwenWrapper.app
+        run: mkdir -p Payload/QwenStudio.app
 
       - name: Write Swift Source
         run: |
-          cat > QwenWrapper.swift << 'EOF'
+          cat > QwenStudio.swift << 'EOF'
           import UIKit
           import WebKit
 
@@ -30,10 +30,21 @@ jobs:
           class ViewController: UIViewController {
               override func viewDidLoad() {
                   super.viewDidLoad()
-                  let webView = WKWebView(frame: view.bounds)
-                  webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                  
+                  let webView = WKWebView()
+                  webView.translatesAutoresizingMaskIntoConstraints = false
                   webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
+                  
                   view.addSubview(webView)
+                  
+                  // Pin to SAFE AREA — no overlap with status bar
+                  NSLayoutConstraint.activate([
+                      webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+                      webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                      webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                      webView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+                  ])
+                  
                   if let url = URL(string: "https://chat.qwen.ai/") {
                       webView.load(URLRequest(url: url))
                   }
@@ -48,12 +59,12 @@ jobs:
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
           swiftc -sdk "$SDK_PATH" -target arm64-apple-ios15.0 \
             -framework UIKit -framework WebKit \
-            -o Payload/QwenWrapper.app/QwenWrapper QwenWrapper.swift
-          chmod +x Payload/QwenWrapper.app/QwenWrapper
+            -o Payload/QwenStudio.app/QwenStudio QwenStudio.swift
+          chmod +x Payload/QwenStudio.app/QwenStudio
 
       - name: Create Info.plist
         run: |
-          cat > Payload/QwenWrapper.app/Info.plist << 'EOF'
+          cat > Payload/QwenStudio.app/Info.plist << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -61,13 +72,13 @@ jobs:
             <key>CFBundleDevelopmentRegion</key>
             <string>en</string>
             <key>CFBundleExecutable</key>
-            <string>QwenWrapper</string>
+            <string>QwenStudio</string>
             <key>CFBundleIdentifier</key>
-            <string>com.example.qwenwrapper</string>
+            <string>com.example.qwenstudio</string>
             <key>CFBundleInfoDictionaryVersion</key>
             <string>6.0</string>
             <key>CFBundleName</key>
-            <string>QwenWrapper</string>
+            <string>Qwen Studio</string>
             <key>CFBundlePackageType</key>
             <string>APPL</string>
             <key>CFBundleShortVersionString</key>
@@ -78,6 +89,32 @@ jobs:
             </array>
             <key>CFBundleVersion</key>
             <string>1</string>
+            <key>CFBundleIcons</key>
+            <dict>
+              <key>CFBundlePrimaryIcon</key>
+              <dict>
+                <key>CFBundleIconFiles</key>
+                <array>
+                  <string>AppIcon60x60</string>
+                </array>
+                <key>CFBundleIconName</key>
+                <string>AppIcon</string>
+              </dict>
+            </dict>
+            <key>CFBundleIcons~ipad</key>
+            <dict>
+              <key>CFBundlePrimaryIcon</key>
+              <dict>
+                <key>CFBundleIconFiles</key>
+                <array>
+                  <string>AppIcon60x60</string>
+                  <string>AppIcon76x76</string>
+                  <string>AppIcon83.5x83.5</string>
+                </array>
+                <key>CFBundleIconName</key>
+                <string>AppIcon</string>
+              </dict>
+            </dict>
             <key>LSRequiresIPhoneOS</key>
             <true/>
             <key>MinimumOSVersion</key>
@@ -85,31 +122,35 @@ jobs:
             <key>UIDeviceFamily</key>
             <array>
               <integer>1</integer>
+              <integer>2</integer>
             </array>
             <key>UISupportedInterfaceOrientations</key>
             <array>
               <string>UIInterfaceOrientationPortrait</string>
               <string>UIInterfaceOrientationLandscapeLeft</string>
               <string>UIInterfaceOrientationLandscapeRight</string>
+              <string>UIInterfaceOrientationPortraitUpsideDown</string>
             </array>
+            <key>UIViewControllerBasedStatusBarAppearance</key>
+            <true/>
           </dict>
           </plist>
           EOF
 
       - name: Create PkgInfo
-        run: printf 'APPL????' > Payload/QwenWrapper.app/PkgInfo
+        run: printf 'APPL????' > Payload/QwenStudio.app/PkgInfo
 
       - name: Verify Binary Architecture
         run: |
-          file Payload/QwenWrapper.app/QwenWrapper
-          lipo -info Payload/QwenWrapper.app/QwenWrapper || true
+          file Payload/QwenStudio.app/QwenStudio
+          lipo -info Payload/QwenStudio.app/QwenStudio || true
 
       - name: Package IPA
-        run: zip -r QwenWrapper.ipa Payload
+        run: zip -r QwenStudio.ipa Payload
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: QwenWrapper-IPA
-          path: QwenWrapper.ipa
+          name: QwenStudio-IPA
+          path: QwenStudio.ipa
           retention-days: 5
