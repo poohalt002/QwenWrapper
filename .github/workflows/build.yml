@@ -1,156 +1,180 @@
+The issue is that the status bar area above the web view shows the default black/transparent background, while your web content starts below it. To make it look like a real native app, you need to match the background color to the website's header and set the correct status bar text color.
+For Qwen Studio (light/white themed), here is the fixed version:
 name: Build QwenStudio IPA
-
 on:
-  workflow_dispatch:
-
+workflow_dispatch:
 jobs:
-  build:
-    runs-on: macos-latest
-    steps:
-      - name: Create App Bundle Structure
-        run: mkdir -p Payload/QwenStudio.app
+build:
+runs-on: macos-latest
+steps:
+- name: Create App Bundle Structure
+run: mkdir -p Payload/QwenStudio.app
+  - name: Write Swift Source
+    run: |
+      cat > QwenStudio.swift << 'EOF'
+      import UIKit
+      import WebKit
 
-      - name: Write Swift Source
-        run: |
-          cat > QwenStudio.swift << 'EOF'
-          import UIKit
-          import WebKit
+      class AppDelegate: UIResponder, UIApplicationDelegate {
+          var window: UIWindow?
+          
+          func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+              window = UIWindow(frame: UIScreen.main.bounds)
+              window?.rootViewController = ViewController()
+              window?.makeKeyAndVisible()
+              return true
+          }
+      }
 
-          class AppDelegate: UIResponder, UIApplicationDelegate {
-              var window: UIWindow?
+      class ViewController: UIViewController {
+          
+          // Dark text for light background (Qwen is white/light)
+          override var preferredStatusBarStyle: UIStatusBarStyle {
+              return .darkContent
+          }
+          
+          override func viewDidLoad() {
+              super.viewDidLoad()
               
-              func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-                  window = UIWindow(frame: UIScreen.main.bounds)
-                  window?.rootViewController = ViewController()
-                  window?.makeKeyAndVisible()
-                  return true
+              // Match Qwen's light theme so status bar area blends in
+              view.backgroundColor = .white
+              
+              let webView = WKWebView()
+              webView.translatesAutoresizingMaskIntoConstraints = false
+              webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
+              
+              view.addSubview(webView)
+              
+              // Safe area layout — no overlap
+              NSLayoutConstraint.activate([
+                  webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+                  webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                  webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                  webView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+              ])
+              
+              if let url = URL(string: "https://chat.qwen.ai/") {
+                  webView.load(URLRequest(url: url))
               }
           }
+      }
 
-          class ViewController: UIViewController {
-              override func viewDidLoad() {
-                  super.viewDidLoad()
-                  
-                  let webView = WKWebView()
-                  webView.translatesAutoresizingMaskIntoConstraints = false
-                  webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
-                  
-                  view.addSubview(webView)
-                  
-                  // Pin to SAFE AREA — no overlap with status bar
-                  NSLayoutConstraint.activate([
-                      webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-                      webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-                      webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-                      webView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-                  ])
-                  
-                  if let url = URL(string: "https://chat.qwen.ai/") {
-                      webView.load(URLRequest(url: url))
-                  }
-              }
-          }
+      UIApplicationMain(CommandLine.argc, CommandLine.unsafeArgv, nil, NSStringFromClass(AppDelegate.self))
+      EOF
 
-          UIApplicationMain(CommandLine.argc, CommandLine.unsafeArgv, nil, NSStringFromClass(AppDelegate.self))
-          EOF
+  - name: Compile for iOS arm64
+    run: |
+      SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+      swiftc -sdk "$SDK_PATH" -target arm64-apple-ios15.0 \
+        -framework UIKit -framework WebKit \
+        -o Payload/QwenStudio.app/QwenStudio QwenStudio.swift
+      chmod +x Payload/QwenStudio.app/QwenStudio
 
-      - name: Compile for iOS arm64
-        run: |
-          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
-          swiftc -sdk "$SDK_PATH" -target arm64-apple-ios15.0 \
-            -framework UIKit -framework WebKit \
-            -o Payload/QwenStudio.app/QwenStudio QwenStudio.swift
-          chmod +x Payload/QwenStudio.app/QwenStudio
-
-      - name: Create Info.plist
-        run: |
-          cat > Payload/QwenStudio.app/Info.plist << 'EOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
+  - name: Create Info.plist
+    run: |
+      cat > Payload/QwenStudio.app/Info.plist << 'EOF'
+      <?xml version="1.0" encoding="UTF-8"?>
+      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+      <plist version="1.0">
+      <dict>
+        <key>CFBundleDevelopmentRegion</key>
+        <string>en</string>
+        <key>CFBundleExecutable</key>
+        <string>QwenStudio</string>
+        <key>CFBundleIdentifier</key>
+        <string>com.example.qwenstudio</string>
+        <key>CFBundleInfoDictionaryVersion</key>
+        <string>6.0</string>
+        <key>CFBundleName</key>
+        <string>Qwen Studio</string>
+        <key>CFBundlePackageType</key>
+        <string>APPL</string>
+        <key>CFBundleShortVersionString</key>
+        <string>1.0</string>
+        <key>CFBundleSupportedPlatforms</key>
+        <array>
+          <string>iPhoneOS</string>
+        </array>
+        <key>CFBundleVersion</key>
+        <string>1</string>
+        <key>CFBundleIcons</key>
+        <dict>
+          <key>CFBundlePrimaryIcon</key>
           <dict>
-            <key>CFBundleDevelopmentRegion</key>
-            <string>en</string>
-            <key>CFBundleExecutable</key>
-            <string>QwenStudio</string>
-            <key>CFBundleIdentifier</key>
-            <string>com.example.qwenstudio</string>
-            <key>CFBundleInfoDictionaryVersion</key>
-            <string>6.0</string>
-            <key>CFBundleName</key>
-            <string>Qwen Studio</string>
-            <key>CFBundlePackageType</key>
-            <string>APPL</string>
-            <key>CFBundleShortVersionString</key>
-            <string>1.0</string>
-            <key>CFBundleSupportedPlatforms</key>
+            <key>CFBundleIconFiles</key>
             <array>
-              <string>iPhoneOS</string>
+              <string>AppIcon60x60</string>
             </array>
-            <key>CFBundleVersion</key>
-            <string>1</string>
-            <key>CFBundleIcons</key>
-            <dict>
-              <key>CFBundlePrimaryIcon</key>
-              <dict>
-                <key>CFBundleIconFiles</key>
-                <array>
-                  <string>AppIcon60x60</string>
-                </array>
-                <key>CFBundleIconName</key>
-                <string>AppIcon</string>
-              </dict>
-            </dict>
-            <key>CFBundleIcons~ipad</key>
-            <dict>
-              <key>CFBundlePrimaryIcon</key>
-              <dict>
-                <key>CFBundleIconFiles</key>
-                <array>
-                  <string>AppIcon60x60</string>
-                  <string>AppIcon76x76</string>
-                  <string>AppIcon83.5x83.5</string>
-                </array>
-                <key>CFBundleIconName</key>
-                <string>AppIcon</string>
-              </dict>
-            </dict>
-            <key>LSRequiresIPhoneOS</key>
-            <true/>
-            <key>MinimumOSVersion</key>
-            <string>15.0</string>
-            <key>UIDeviceFamily</key>
-            <array>
-              <integer>1</integer>
-              <integer>2</integer>
-            </array>
-            <key>UISupportedInterfaceOrientations</key>
-            <array>
-              <string>UIInterfaceOrientationPortrait</string>
-              <string>UIInterfaceOrientationLandscapeLeft</string>
-              <string>UIInterfaceOrientationLandscapeRight</string>
-              <string>UIInterfaceOrientationPortraitUpsideDown</string>
-            </array>
-            <key>UIViewControllerBasedStatusBarAppearance</key>
-            <true/>
+            <key>CFBundleIconName</key>
+            <string>AppIcon</string>
           </dict>
-          </plist>
-          EOF
+        </dict>
+        <key>CFBundleIcons~ipad</key>
+        <dict>
+          <key>CFBundlePrimaryIcon</key>
+          <dict>
+            <key>CFBundleIconFiles</key>
+            <array>
+              <string>AppIcon60x60</string>
+              <string>AppIcon76x76</string>
+              <string>AppIcon83.5x83.5</string>
+            </array>
+            <key>CFBundleIconName</key>
+            <string>AppIcon</string>
+          </dict>
+        </dict>
+        <key>LSRequiresIPhoneOS</key>
+        <true/>
+        <key>MinimumOSVersion</key>
+        <string>15.0</string>
+        <key>UIDeviceFamily</key>
+        <array>
+          <integer>1</integer>
+          <integer>2</integer>
+        </array>
+        <key>UISupportedInterfaceOrientations</key>
+        <array>
+          <string>UIInterfaceOrientationPortrait</string>
+          <string>UIInterfaceOrientationLandscapeLeft</string>
+          <string>UIInterfaceOrientationLandscapeRight</string>
+          <string>UIInterfaceOrientationPortraitUpsideDown</string>
+        </array>
+        <key>UIViewControllerBasedStatusBarAppearance</key>
+        <true/>
+      </dict>
+      </plist>
+      EOF
 
-      - name: Create PkgInfo
-        run: printf 'APPL????' > Payload/QwenStudio.app/PkgInfo
+  - name: Create PkgInfo
+    run: printf 'APPL????' > Payload/QwenStudio.app/PkgInfo
 
-      - name: Verify Binary Architecture
-        run: |
-          file Payload/QwenStudio.app/QwenStudio
-          lipo -info Payload/QwenStudio.app/QwenStudio || true
+  - name: Verify Binary Architecture
+    run: |
+      file Payload/QwenStudio.app/QwenStudio
+      lipo -info Payload/QwenStudio.app/QwenStudio || true
 
-      - name: Package IPA
-        run: zip -r QwenStudio.ipa Payload
+  - name: Package IPA
+    run: zip -r QwenStudio.ipa Payload
 
-      - name: Upload IPA Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: QwenStudio-IPA
-          path: QwenStudio.ipa
-          retention-days: 5
+  - name: Upload IPA Artifact
+    uses: actions/upload-artifact@v4
+    with:
+      name: QwenStudio-IPA
+      path: QwenStudio.ipa
+      retention-days: 5
+
+----
+What Changed
+Before	After
+Default black background behind status bar	view.backgroundColor = .white matches Qwen's light theme
+Status bar text invisible/wrong	preferredStatusBarStyle = .darkContent makes clock/signal black on white
+Looks like a cheap web wrapper	Looks like a real native iOS app
+For Gemini (Dark Theme)
+If you want the same for Gemini (which has a dark purple/blue header), change these two lines in the Swift code:
+view.backgroundColor = .black
+override var preferredStatusBarStyle: UIStatusBarStyle {
+return .lightContent  // White text on black background
+}
+----
+Result
+The status bar area now blends seamlessly with the web content below it. No more black strip or color clash — it looks like a real App Store app.
