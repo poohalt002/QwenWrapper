@@ -13,7 +13,7 @@ jobs:
           
           mkdir -p Payload/QwenStudio.app
           
-          cat > app.swift <<'EOF'
+          cat > app.swift <<'SWIFT'
           import UIKit
           import WebKit
           
@@ -25,19 +25,62 @@ jobs:
                       setNeedsStatusBarAppearanceUpdate()
                   }
               }
+              
               override var preferredStatusBarStyle: UIStatusBarStyle {
                   return isDark ? .lightContent : .darkContent
               }
+              
               override func viewDidLoad() {
                   super.viewDidLoad()
+                  
                   let config = WKWebViewConfiguration()
                   config.userContentController.add(self, name: "themeHandler")
-                  let js = "function check(){var d=false;if(document.documentElement.classList.contains('dark'))d=true;if(window.matchMedia('(prefers-color-scheme: dark)').matches)d=true;window.webkit.messageHandlers.themeHandler.postMessage(d?'dark':'light');}check();setInterval(check,1000);"
+                  
+                  let js = """
+                  (function() {
+                      function detectTheme() {
+                          var dark = false;
+                          var html = document.documentElement;
+                          var body = document.body;
+                          
+                          // Check common class names
+                          if (html.classList.contains('dark') || html.classList.contains('dark-mode')) dark = true;
+                          if (body && (body.classList.contains('dark') || body.classList.contains('dark-mode'))) dark = true;
+                          
+                          // Check data attributes
+                          if (html.getAttribute('data-theme') === 'dark' || html.getAttribute('data-mode') === 'dark') dark = true;
+                          if (body && (body.getAttribute('data-theme') === 'dark' || body.getAttribute('data-mode') === 'dark')) dark = true;
+                          
+                          // Check color-scheme CSS
+                          if (html.style.colorScheme === 'dark' || (body && body.style.colorScheme === 'dark')) dark = true;
+                          
+                          // Fallback to system preference
+                          if (window.matchMedia('(prefers-color-scheme: dark)').matches) dark = true;
+                          
+                          // Send to native
+                          if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.themeHandler) {
+                              window.webkit.messageHandlers.themeHandler.postMessage(dark ? 'dark' : 'light');
+                          }
+                      }
+                      
+                      // Run immediately and on changes
+                      detectTheme();
+                      var observer = new MutationObserver(detectTheme);
+                      observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme', 'data-mode', 'style'] });
+                      if (document.body) {
+                          observer.observe(document.body, { attributes: true, attributeFilter: ['class', 'data-theme', 'data-mode', 'style'] });
+                      }
+                      setInterval(detectTheme, 500);
+                  })();
+                  """
+                  
                   let userScript = WKUserScript(source: js, injectionTime: .atDocumentEnd, forMainFrameOnly: false)
                   config.userContentController.addUserScript(userScript)
+                  
                   webView = WKWebView(frame: .zero, configuration: config)
                   webView.translatesAutoresizingMaskIntoConstraints = false
                   webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
+                  
                   view.addSubview(webView)
                   NSLayoutConstraint.activate([
                       webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
@@ -45,10 +88,12 @@ jobs:
                       webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
                       webView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
                   ])
+                  
                   if let url = URL(string: "https://chat.qwen.ai/") {
                       webView.load(URLRequest(url: url))
                   }
               }
+              
               func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
                   if let theme = message.body as? String {
                       isDark = (theme == "dark")
@@ -67,13 +112,13 @@ jobs:
           }
           
           UIApplicationMain(CommandLine.argc, CommandLine.unsafeArgv, nil, NSStringFromClass(AppDelegate.self))
-          EOF
+          SWIFT
           
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           xcrun -sdk iphoneos swiftc -target arm64-apple-ios15.0 -framework UIKit -framework WebKit -o Payload/QwenStudio.app/QwenStudio app.swift
           chmod +x Payload/QwenStudio.app/QwenStudio
           
-          cat > Payload/QwenStudio.app/Info.plist <<'EOF'
+          cat > Payload/QwenStudio.app/Info.plist <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -92,7 +137,7 @@ jobs:
           <key>CFBundleIcons</key><dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string></array><key>CFBundleIconName</key><string>AppIcon</string></dict></dict>
           </dict>
           </plist>
-          EOF
+          PLIST
           
           printf 'APPL????' > Payload/QwenStudio.app/PkgInfo
           zip -r QwenStudio.ipa Payload
