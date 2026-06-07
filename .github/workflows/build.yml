@@ -1,87 +1,52 @@
-name: Build QwenStudio
+name: Build QwenStudio IPA
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: macos-latest
     steps:
-      - name: Build IPA
+      - name: Create App Bundle Structure
+        run: mkdir -p Payload/QwenStudio.app
+
+      - name: Write Swift Source
         run: |
-          set -e
-          set -x
-          
-          mkdir -p Payload/QwenStudio.app
-          
-          cat > app.swift <<'SWIFT'
+          cat > QwenStudio.swift << 'EOF'
           import UIKit
           import WebKit
-          
-          class ViewController: UIViewController, WKScriptMessageHandler {
-              var webView: WKWebView!
-              var isDark = false {
-                  didSet {
-                      view.backgroundColor = isDark ? UIColor.black : UIColor.white
-                      setNeedsStatusBarAppearanceUpdate()
-                  }
-              }
+
+          class AppDelegate: UIResponder, UIApplicationDelegate {
+              var window: UIWindow?
               
+              func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+                  window = UIWindow(frame: UIScreen.main.bounds)
+                  window?.rootViewController = ViewController()
+                  window?.makeKeyAndVisible()
+                  return true
+              }
+          }
+
+          class ViewController: UIViewController {
+              
+              // Dark text for light background (Qwen is white/light)
               override var preferredStatusBarStyle: UIStatusBarStyle {
-                  return isDark ? .lightContent : .darkContent
+                  return .darkContent
               }
               
               override func viewDidLoad() {
                   super.viewDidLoad()
                   
-                  let config = WKWebViewConfiguration()
-                  config.userContentController.add(self, name: "themeHandler")
+                  // Match Qwen's light theme so status bar area blends in
+                  view.backgroundColor = .white
                   
-                  let js = """
-                  (function() {
-                      function detectTheme() {
-                          var dark = false;
-                          var html = document.documentElement;
-                          var body = document.body;
-                          
-                          // Check common class names
-                          if (html.classList.contains('dark') || html.classList.contains('dark-mode')) dark = true;
-                          if (body && (body.classList.contains('dark') || body.classList.contains('dark-mode'))) dark = true;
-                          
-                          // Check data attributes
-                          if (html.getAttribute('data-theme') === 'dark' || html.getAttribute('data-mode') === 'dark') dark = true;
-                          if (body && (body.getAttribute('data-theme') === 'dark' || body.getAttribute('data-mode') === 'dark')) dark = true;
-                          
-                          // Check color-scheme CSS
-                          if (html.style.colorScheme === 'dark' || (body && body.style.colorScheme === 'dark')) dark = true;
-                          
-                          // Fallback to system preference
-                          if (window.matchMedia('(prefers-color-scheme: dark)').matches) dark = true;
-                          
-                          // Send to native
-                          if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.themeHandler) {
-                              window.webkit.messageHandlers.themeHandler.postMessage(dark ? 'dark' : 'light');
-                          }
-                      }
-                      
-                      // Run immediately and on changes
-                      detectTheme();
-                      var observer = new MutationObserver(detectTheme);
-                      observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme', 'data-mode', 'style'] });
-                      if (document.body) {
-                          observer.observe(document.body, { attributes: true, attributeFilter: ['class', 'data-theme', 'data-mode', 'style'] });
-                      }
-                      setInterval(detectTheme, 500);
-                  })();
-                  """
-                  
-                  let userScript = WKUserScript(source: js, injectionTime: .atDocumentEnd, forMainFrameOnly: false)
-                  config.userContentController.addUserScript(userScript)
-                  
-                  webView = WKWebView(frame: .zero, configuration: config)
+                  let webView = WKWebView()
                   webView.translatesAutoresizingMaskIntoConstraints = false
                   webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
                   
                   view.addSubview(webView)
+                  
+                  // Safe area layout — no overlap
                   NSLayoutConstraint.activate([
                       webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
                       webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -93,56 +58,107 @@ jobs:
                       webView.load(URLRequest(url: url))
                   }
               }
-              
-              func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-                  if let theme = message.body as? String {
-                      isDark = (theme == "dark")
-                  }
-              }
           }
-          
-          class AppDelegate: UIResponder, UIApplicationDelegate {
-              var window: UIWindow?
-              func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-                  window = UIWindow(frame: UIScreen.main.bounds)
-                  window?.rootViewController = ViewController()
-                  window?.makeKeyAndVisible()
-                  return true
-              }
-          }
-          
+
           UIApplicationMain(CommandLine.argc, CommandLine.unsafeArgv, nil, NSStringFromClass(AppDelegate.self))
-          SWIFT
-          
-          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          xcrun -sdk iphoneos swiftc -target arm64-apple-ios15.0 -framework UIKit -framework WebKit -o Payload/QwenStudio.app/QwenStudio app.swift
+          EOF
+
+      - name: Compile for iOS arm64
+        run: |
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+          swiftc -sdk "$SDK_PATH" -target arm64-apple-ios15.0 \
+            -framework UIKit -framework WebKit \
+            -o Payload/QwenStudio.app/QwenStudio QwenStudio.swift
           chmod +x Payload/QwenStudio.app/QwenStudio
-          
-          cat > Payload/QwenStudio.app/Info.plist <<'PLIST'
+
+      - name: Create Info.plist
+        run: |
+          cat > Payload/QwenStudio.app/Info.plist << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
-          <key>CFBundleExecutable</key><string>QwenStudio</string>
-          <key>CFBundleIdentifier</key><string>com.qwen.studio</string>
-          <key>CFBundleName</key><string>Qwen Studio</string>
-          <key>CFBundlePackageType</key><string>APPL</string>
-          <key>CFBundleShortVersionString</key><string>1.0</string>
-          <key>CFBundleVersion</key><string>1</string>
-          <key>LSRequiresIPhoneOS</key><true/>
-          <key>MinimumOSVersion</key><string>15.0</string>
-          <key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>
-          <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
-          <key>UIViewControllerBasedStatusBarAppearance</key><true/>
-          <key>CFBundleIcons</key><dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string></array><key>CFBundleIconName</key><string>AppIcon</string></dict></dict>
+            <key>CFBundleDevelopmentRegion</key>
+            <string>en</string>
+            <key>CFBundleExecutable</key>
+            <string>QwenStudio</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.example.qwenstudio</string>
+            <key>CFBundleInfoDictionaryVersion</key>
+            <string>6.0</string>
+            <key>CFBundleName</key>
+            <string>Qwen Studio</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleShortVersionString</key>
+            <string>1.0</string>
+            <key>CFBundleSupportedPlatforms</key>
+            <array>
+              <string>iPhoneOS</string>
+            </array>
+            <key>CFBundleVersion</key>
+            <string>1</string>
+            <key>CFBundleIcons</key>
+            <dict>
+              <key>CFBundlePrimaryIcon</key>
+              <dict>
+                <key>CFBundleIconFiles</key>
+                <array>
+                  <string>AppIcon60x60</string>
+                </array>
+                <key>CFBundleIconName</key>
+                <string>AppIcon</string>
+              </dict>
+            </dict>
+            <key>CFBundleIcons~ipad</key>
+            <dict>
+              <key>CFBundlePrimaryIcon</key>
+              <dict>
+                <key>CFBundleIconFiles</key>
+                <array>
+                  <string>AppIcon60x60</string>
+                  <string>AppIcon76x76</string>
+                  <string>AppIcon83.5x83.5</string>
+                </array>
+                <key>CFBundleIconName</key>
+                <string>AppIcon</string>
+              </dict>
+            </dict>
+            <key>LSRequiresIPhoneOS</key>
+            <true/>
+            <key>MinimumOSVersion</key>
+            <string>15.0</string>
+            <key>UIDeviceFamily</key>
+            <array>
+              <integer>1</integer>
+              <integer>2</integer>
+            </array>
+            <key>UISupportedInterfaceOrientations</key>
+            <array>
+              <string>UIInterfaceOrientationPortrait</string>
+              <string>UIInterfaceOrientationLandscapeLeft</string>
+              <string>UIInterfaceOrientationLandscapeRight</string>
+              <string>UIInterfaceOrientationPortraitUpsideDown</string>
+            </array>
+            <key>UIViewControllerBasedStatusBarAppearance</key>
+            <true/>
           </dict>
           </plist>
-          PLIST
-          
-          printf 'APPL????' > Payload/QwenStudio.app/PkgInfo
-          zip -r QwenStudio.ipa Payload
+          EOF
 
-      - uses: actions/upload-artifact@v4
+      - name: Create PkgInfo
+        run: printf 'APPL????' > Payload/QwenStudio.app/PkgInfo
+
+      - name: Verify Binary Architecture
+        run: |
+          file Payload/QwenStudio.app/QwenStudio
+          lipo -info Payload/QwenStudio.app/QwenStudio || true
+
+      - name: Package IPA
+        run: zip -r QwenStudio.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
         with:
           name: QwenStudio-IPA
           path: QwenStudio.ipa
