@@ -25,36 +25,75 @@ jobs:
 
               override func viewDidLoad() {
                   super.viewDidLoad()
+                  // Default to white before page loads (matches Qwen default)
+                  view.backgroundColor = UIColor.white
+                  sb = false
+                  
                   let c = WKWebViewConfiguration()
                   c.userContentController.add(self, name: "t")
                   let j = """
                   (function(){
                     var last='';
                     var stable=0;
-                    function getColor(){
-                      var el=document.querySelector('header,nav,.header,.navbar,.app-header,.top-bar,#header,[class*=header]');
-                      if(!el) el=document.body;
-                      if(!el) el=document.documentElement;
-                      var bg=window.getComputedStyle(el).backgroundColor;
-                      var m=bg.match(/(\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)/);
-                      return m?m[1]+','+m[2]+','+m[3]:'255,255,255';
+                    function getTopColor(){
+                      // Try header-like elements first
+                      var selectors=['header','nav','[class*=header]','[class*=nav]','[class*=top]','[id*=header]','[id*=nav]','.app-header','.navbar','.top-bar','#header'];
+                      for(var i=0;i<selectors.length;i++){
+                        var el=document.querySelector(selectors[i]);
+                        if(el){
+                          var rect=el.getBoundingClientRect();
+                          if(rect.top<=5 && rect.height>20){
+                            var c=getComputedStyle(el).backgroundColor;
+                            var m=c.match(/(\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)/);
+                            if(m && c!=='rgba(0, 0, 0, 0)' && c!=='transparent') return m[1]+','+m[2]+','+m[3];
+                          }
+                        }
+                      }
+                      // Check first 60px of page for any solid background
+                      var candidates=document.querySelectorAll('body > *');
+                      for(var i=0;i<candidates.length;i++){
+                        var r=candidates[i].getBoundingClientRect();
+                        if(r.top<=5 && r.height>30){
+                          var c=getComputedStyle(candidates[i]).backgroundColor;
+                          var m=c.match(/(\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)/);
+                          if(m && c!=='rgba(0, 0, 0, 0)' && c!=='transparent') return m[1]+','+m[2]+','+m[3];
+                        }
+                      }
+                      // Walk up from body to find solid background
+                      var el=document.body;
+                      while(el && el!==document.documentElement){
+                        var c=getComputedStyle(el).backgroundColor;
+                        var m=c.match(/(\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)/);
+                        if(m && c!=='rgba(0, 0, 0, 0)' && c!=='transparent') return m[1]+','+m[2]+','+m[3];
+                        el=el.parentElement;
+                      }
+                      // Check html element
+                      var c=getComputedStyle(document.documentElement).backgroundColor;
+                      var m=c.match(/(\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)/);
+                      if(m) return m[1]+','+m[2]+','+m[3];
+                      return '255,255,255';
                     }
                     function send(){
-                      var color=getColor();
+                      var color=getTopColor();
                       if(color===last){stable++;}else{stable=0;last=color;}
-                      if(stable>=2){
+                      if(stable>=1){
                         if(window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.t){
                           window.webkit.messageHandlers.t.postMessage(color);
                         }
                       }
                     }
-                    send();
-                    setInterval(send,300);
-                    var observer=new MutationObserver(send);
+                    // Send immediately when DOM ready
+                    if(document.readyState==='loading'){
+                      document.addEventListener('DOMContentLoaded',send);
+                    }else{
+                      send();
+                    }
+                    setInterval(send,400);
+                    var observer=new MutationObserver(function(){stable=0;send();});
                     observer.observe(document.documentElement,{attributes:true,childList:true,subtree:true});
                   })()
                   """
-                  c.userContentController.addUserScript(WKUserScript(source: j, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
+                  c.userContentController.addUserScript(WKUserScript(source: j, injectionTime: .atDocumentStart, forMainFrameOnly: false))
                   wv = WKWebView(frame: .zero, configuration: c)
                   wv.translatesAutoresizingMaskIntoConstraints = false
                   wv.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
@@ -84,11 +123,10 @@ jobs:
                               let B = CGFloat(p[2]) / 255.0
                               view.backgroundColor = UIColor(red: R, green: G, blue: B, alpha: 1.0)
                               let l = (0.299 * CGFloat(p[0]) + 0.587 * CGFloat(p[1]) + 0.114 * CGFloat(p[2])) / 255.0
-                              // Hysteresis: dead zone prevents flickering
                               let newDark: Bool
                               if l < 0.45 { newDark = true }
                               else if l > 0.55 { newDark = false }
-                              else { newDark = sb } // keep current if in dead zone
+                              else { newDark = sb }
                               if newDark != sb {
                                   sb = newDark
                                   setNeedsStatusBarAppearanceUpdate()
