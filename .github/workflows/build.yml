@@ -8,9 +8,12 @@ jobs:
     steps:
       - name: Build IPA
         run: |
+          set -e
+          set -x
+          
           mkdir -p Payload/QwenStudio.app
           
-          cat > app.swift <<'SWIFT'
+          cat > app.swift <<'EOF'
           import UIKit
           import WebKit
           
@@ -18,48 +21,23 @@ jobs:
               var webView: WKWebView!
               var isDark = false {
                   didSet {
-                      view.backgroundColor = isDark ? .black : .white
+                      view.backgroundColor = isDark ? UIColor.black : UIColor.white
                       setNeedsStatusBarAppearanceUpdate()
                   }
               }
-              
               override var preferredStatusBarStyle: UIStatusBarStyle {
                   return isDark ? .lightContent : .darkContent
               }
-              
               override func viewDidLoad() {
                   super.viewDidLoad()
-                  
                   let config = WKWebViewConfiguration()
                   config.userContentController.add(self, name: "themeHandler")
-                  
-                  let script = """
-                  (function() {
-                      function checkTheme() {
-                          var isDark = false;
-                          var html = document.documentElement;
-                          var body = document.body;
-                          if (html.classList.contains('dark') || html.getAttribute('data-theme') === 'dark') isDark = true;
-                          if (body && (body.classList.contains('dark') || body.getAttribute('data-theme') === 'dark')) isDark = true;
-                          if (window.matchMedia('(prefers-color-scheme: dark)').matches) isDark = true;
-                          if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.themeHandler) {
-                              window.webkit.messageHandlers.themeHandler.postMessage(isDark ? 'dark' : 'light');
-                          }
-                      }
-                      checkTheme();
-                      var observer = new MutationObserver(checkTheme);
-                      observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme'] });
-                      if (document.body) observer.observe(document.body, { attributes: true, attributeFilter: ['class', 'data-theme'] });
-                      setInterval(checkTheme, 1000);
-                  })();
-                  """
-                  let userScript = WKUserScript(source: script, injectionTime: .atDocumentEnd, forMainFrameOnly: false)
+                  let js = "function check(){var d=false;if(document.documentElement.classList.contains('dark'))d=true;if(window.matchMedia('(prefers-color-scheme: dark)').matches)d=true;window.webkit.messageHandlers.themeHandler.postMessage(d?'dark':'light');}check();setInterval(check,1000);"
+                  let userScript = WKUserScript(source: js, injectionTime: .atDocumentEnd, forMainFrameOnly: false)
                   config.userContentController.addUserScript(userScript)
-                  
                   webView = WKWebView(frame: .zero, configuration: config)
                   webView.translatesAutoresizingMaskIntoConstraints = false
                   webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
-                  
                   view.addSubview(webView)
                   NSLayoutConstraint.activate([
                       webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
@@ -67,12 +45,10 @@ jobs:
                       webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
                       webView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
                   ])
-                  
                   if let url = URL(string: "https://chat.qwen.ai/") {
                       webView.load(URLRequest(url: url))
                   }
               }
-              
               func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
                   if let theme = message.body as? String {
                       isDark = (theme == "dark")
@@ -80,7 +56,6 @@ jobs:
               }
           }
           
-          @main
           class AppDelegate: UIResponder, UIApplicationDelegate {
               var window: UIWindow?
               func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
@@ -90,13 +65,15 @@ jobs:
                   return true
               }
           }
-          SWIFT
+          
+          UIApplicationMain(CommandLine.argc, CommandLine.unsafeArgv, nil, NSStringFromClass(AppDelegate.self))
+          EOF
           
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          swiftc -sdk "$SDK" -target arm64-apple-ios15.0 -framework UIKit -framework WebKit -o Payload/QwenStudio.app/QwenStudio app.swift
+          xcrun -sdk iphoneos swiftc -target arm64-apple-ios15.0 -framework UIKit -framework WebKit -o Payload/QwenStudio.app/QwenStudio app.swift
           chmod +x Payload/QwenStudio.app/QwenStudio
           
-          cat > Payload/QwenStudio.app/Info.plist <<'PLIST'
+          cat > Payload/QwenStudio.app/Info.plist <<'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -115,7 +92,7 @@ jobs:
           <key>CFBundleIcons</key><dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string></array><key>CFBundleIconName</key><string>AppIcon</string></dict></dict>
           </dict>
           </plist>
-          PLIST
+          EOF
           
           printf 'APPL????' > Payload/QwenStudio.app/PkgInfo
           zip -r QwenStudio.ipa Payload
