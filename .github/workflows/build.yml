@@ -28,28 +28,12 @@ jobs:
                   view.backgroundColor = UIColor.white
                   sb = false
                   
-                  let nav = UINavigationController(rootViewController: self)
-                  nav.isNavigationBarHidden = false
-                  nav.navigationBar.barTintColor = UIColor.red
-                  nav.navigationBar.tintColor = UIColor.white
-                  nav.navigationBar.isTranslucent = false
-                  
-                  self.title = "Qwen Studio"
-                  let inspectBtn = UIBarButtonItem(title: "Inspect", style: .plain, target: self, action: #selector(inspectNow))
-                  inspectBtn.tintColor = UIColor.white
-                  self.navigationItem.rightBarButtonItem = inspectBtn
-                  
-                  if let window = UIApplication.shared.windows.first {
-                      window.rootViewController = nav
-                      window.makeKeyAndVisible()
-                  }
-                  
                   let c = WKWebViewConfiguration()
                   c.userContentController.add(self, name: "themeHandler")
                   
                   let themeJS = "var last='';var stable=0;function getTopColor(){var selectors=['header','nav','[class*=header]','[class*=nav]','[class*=top]','[id*=header]','[id*=nav]','.app-header','.navbar','.top-bar','#header'];for(var i=0;i<selectors.length;i++){var el=document.querySelector(selectors[i]);if(el){var rect=el.getBoundingClientRect();if(rect.top<=5&&rect.height>20){var c=getComputedStyle(el).backgroundColor;var m=c.match(/(\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)/);if(m&&c!=='rgba(0, 0, 0, 0)'&&c!=='transparent')return m[1]+','+m[2]+','+m[3];}}}var candidates=document.querySelectorAll('body > *');for(var i=0;i<candidates.length;i++){var r=candidates[i].getBoundingClientRect();if(r.top<=5&&r.height>30){var c=getComputedStyle(candidates[i]).backgroundColor;var m=c.match(/(\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)/);if(m&&c!=='rgba(0, 0, 0, 0)'&&c!=='transparent')return m[1]+','+m[2]+','+m[3];}}var el=document.body;while(el&&el!==document.documentElement){var c=getComputedStyle(el).backgroundColor;var m=c.match(/(\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)/);if(m&&c!=='rgba(0, 0, 0, 0)'&&c!=='transparent')return m[1]+','+m[2]+','+m[3];el=el.parentElement;}var c=getComputedStyle(document.documentElement).backgroundColor;var m=c.match(/(\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)/);if(m)return m[1]+','+m[2]+','+m[3];return '255,255,255';}function send(){var color=getTopColor();if(color===last){stable++;}else{stable=0;last=color;}if(stable>=1){if(window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.themeHandler){window.webkit.messageHandlers.themeHandler.postMessage(color);}}}if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',send);}else{send();}setInterval(send,400);var observer=new MutationObserver(function(){stable=0;send();});observer.observe(document.documentElement,{attributes:true,childList:true,subtree:true});"
                   
-                  let bannerJS = "var selectors=['.download-app','.app-download','#app-download','.download-banner','.app-banner','[class*=download]','[class*=app-promo]','[class*=app-download]','[id*=download]','[id*=app-download]','header a[href*=download]','header a[href*=app]','.official-app','.promo-banner','.app-promo','.download-btn','.get-app','.install-app'];function hideBanners(){selectors.forEach(function(sel){var els=document.querySelectorAll(sel);els.forEach(function(el){if(el&&el.textContent&&(/download|app|official|install/i.test(el.textContent))){el.style.display='none';el.style.visibility='hidden';el.style.height='0';el.style.overflow='hidden';}});});}hideBanners();setInterval(hideBanners,1000);var observer=new MutationObserver(hideBanners);observer.observe(document.documentElement,{attributes:true,childList:true,subtree:true});"
+                  let bannerJS = "function hideBanner(){var el=document.querySelector('.share-logo-content');if(el){el.style.display='none';el.style.visibility='hidden';el.style.height='0';el.style.overflow='hidden';}}hideBanner();setInterval(hideBanner,500);var observer=new MutationObserver(hideBanner);observer.observe(document.documentElement,{attributes:true,childList:true,subtree:true});"
                   
                   c.userContentController.addUserScript(WKUserScript(source: themeJS, injectionTime: .atDocumentStart, forMainFrameOnly: false))
                   c.userContentController.addUserScript(WKUserScript(source: bannerJS, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
@@ -65,54 +49,6 @@ jobs:
                       wv.bottomAnchor.constraint(equalTo: view.bottomAnchor)
                   ])
                   wv.load(URLRequest(url: URL(string: "https://chat.qwen.ai/")!))
-              }
-
-              @objc func inspectNow() {
-                  let js = "var results=[];var all=document.querySelectorAll('*');for(var i=0;i<<all.length;i++){var el=all[i];var id=el.id||'';var cls=el.className||'';var text=(el.textContent||'').substring(0,40).replace(/\\s+/g,' ');var tag=el.tagName.toLowerCase();var sel=id?('#'+id):(cls?('.'+cls.split(/\\s+/)[0]):tag);if(id||cls){results.push({tag:tag,id:id,class:cls,text:text,selector:sel});}}return JSON.stringify(results.slice(0,60));"
-                  
-                  wv.evaluateJavaScript(js) { [weak self] result, error in
-                      guard let self = self else { return }
-                      if let err = error {
-                          self.showAlert(title: "JS Error", message: err.localizedDescription)
-                          return
-                      }
-                      guard let json = result as? String else {
-                          self.showAlert(title: "Error", message: "No result from JS")
-                          return
-                      }
-                      guard let data = json.data(using: .utf8) else {
-                          self.showAlert(title: "Error", message: "Cannot decode JSON")
-                          return
-                      }
-                      do {
-                          let arr = try JSONSerialization.jsonObject(with: data) as? [[String:String]]
-                          guard let elements = arr, !elements.isEmpty else {
-                              self.showAlert(title: "Empty", message: "No elements with IDs or classes found.")
-                              return
-                          }
-                          self.showInspectorTable(elements: elements)
-                      } catch {
-                          self.showAlert(title: "Parse Error", message: error.localizedDescription)
-                      }
-                  }
-              }
-
-              func showInspectorTable(elements: [[String:String]]) {
-                  let tableVC = InspectorTableViewController()
-                  tableVC.elements = elements
-                  tableVC.onSelect = { [weak self] sel in
-                      UIPasteboard.general.string = sel
-                      self?.showAlert(title: "Copied!", message: "Selector:\n\(sel)")
-                  }
-                  let nav = UINavigationController(rootViewController: tableVC)
-                  nav.modalPresentationStyle = .formSheet
-                  self.present(nav, animated: true)
-              }
-
-              func showAlert(title: String, message: String) {
-                  let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-                  alert.addAction(UIAlertAction(title: "OK", style: .default))
-                  self.present(alert, animated: true)
               }
 
               func userContentController(_ u: WKUserContentController, didReceive m: WKScriptMessage) {
@@ -144,46 +80,6 @@ jobs:
                           }
                       }
                   }
-              }
-          }
-
-          class InspectorTableViewController: UITableViewController {
-              var elements: [[String:String]] = []
-              var onSelect: ((String) -> Void)?
-              
-              override func viewDidLoad() {
-                  super.viewDidLoad()
-                  title = "Tap Element to Copy"
-                  navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .done, target: self, action: #selector(doneTapped))
-                  tableView.register(UITableViewCell.self, forCellReuseIdentifier: "cell")
-              }
-              
-              @objc func doneTapped() {
-                  dismiss(animated: true)
-              }
-              
-              override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-                  return elements.count
-              }
-              
-              override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-                  let cell = tableView.dequeueReusableCell(withIdentifier: "cell", for: indexPath)
-                  let el = elements[indexPath.row]
-                  let tag = el["tag"] ?? "?"
-                  let sel = el["selector"] ?? ""
-                  let text = el["text"] ?? ""
-                  cell.textLabel?.text = "[\(tag)] \(sel)"
-                  cell.detailTextLabel?.text = text
-                  cell.detailTextLabel?.numberOfLines = 2
-                  cell.textLabel?.font = UIFont.systemFont(ofSize: 12)
-                  return cell
-              }
-              
-              override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-                  tableView.deselectRow(at: indexPath, animated: true)
-                  let sel = elements[indexPath.row]["selector"] ?? ""
-                  onSelect?(sel)
-                  dismiss(animated: true)
               }
           }
 
