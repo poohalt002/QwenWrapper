@@ -12,8 +12,9 @@ jobs:
           cat > app.swift <<'SWIFT'
           import UIKit
           import WebKit
+          import AVFoundation
 
-          class VC: UIViewController, WKScriptMessageHandler {
+          class VC: UIViewController, WKScriptMessageHandler, WKUIDelegate {
               var wv: WKWebView!
               var lastColor = "255,255,255"
               var stableCount = 0
@@ -28,8 +29,13 @@ jobs:
                   view.backgroundColor = UIColor.white
                   sb = false
                   
+                  // Request microphone permission upfront
+                  AVCaptureDevice.requestAccess(for: .audio) { _ in }
+                  
                   let c = WKWebViewConfiguration()
                   c.userContentController.add(self, name: "themeHandler")
+                  c.allowsInlineMediaPlayback = true
+                  c.mediaTypesRequiringUserActionForPlayback = []
                   
                   let themeJS = "var last='';var stable=0;function getTopColor(){var selectors=['header','nav','[class*=header]','[class*=nav]','[class*=top]','[id*=header]','[id*=nav]','.app-header','.navbar','.top-bar','#header'];for(var i=0;i<selectors.length;i++){var el=document.querySelector(selectors[i]);if(el){var rect=el.getBoundingClientRect();if(rect.top<=5&&rect.height>20){var c=getComputedStyle(el).backgroundColor;var m=c.match(/(\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)/);if(m&&c!=='rgba(0, 0, 0, 0)'&&c!=='transparent')return m[1]+','+m[2]+','+m[3];}}}var candidates=document.querySelectorAll('body > *');for(var i=0;i<candidates.length;i++){var r=candidates[i].getBoundingClientRect();if(r.top<=5&&r.height>30){var c=getComputedStyle(candidates[i]).backgroundColor;var m=c.match(/(\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)/);if(m&&c!=='rgba(0, 0, 0, 0)'&&c!=='transparent')return m[1]+','+m[2]+','+m[3];}}var el=document.body;while(el&&el!==document.documentElement){var c=getComputedStyle(el).backgroundColor;var m=c.match(/(\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)/);if(m&&c!=='rgba(0, 0, 0, 0)'&&c!=='transparent')return m[1]+','+m[2]+','+m[3];el=el.parentElement;}var c=getComputedStyle(document.documentElement).backgroundColor;var m=c.match(/(\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)/);if(m)return m[1]+','+m[2]+','+m[3];return '255,255,255';}function send(){var color=getTopColor();if(color===last){stable++;}else{stable=0;last=color;}if(stable>=1){if(window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.themeHandler){window.webkit.messageHandlers.themeHandler.postMessage(color);}}}if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',send);}else{send();}setInterval(send,400);var observer=new MutationObserver(function(){stable=0;send();});observer.observe(document.documentElement,{attributes:true,childList:true,subtree:true});"
                   
@@ -41,6 +47,7 @@ jobs:
                   wv = WKWebView(frame: .zero, configuration: c)
                   wv.translatesAutoresizingMaskIntoConstraints = false
                   wv.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
+                  wv.uiDelegate = self
                   view.addSubview(wv)
                   NSLayoutConstraint.activate([
                       wv.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
@@ -49,6 +56,19 @@ jobs:
                       wv.bottomAnchor.constraint(equalTo: view.bottomAnchor)
                   ])
                   wv.load(URLRequest(url: URL(string: "https://chat.qwen.ai/")!))
+              }
+
+              // Handle permission prompts
+              func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+                  completionHandler()
+              }
+
+              func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+                  completionHandler(true)
+              }
+
+              func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
+                  completionHandler(defaultText)
               }
 
               func userContentController(_ u: WKUserContentController, didReceive m: WKScriptMessage) {
@@ -96,7 +116,7 @@ jobs:
           UIApplicationMain(CommandLine.argc, CommandLine.unsafeArgv, nil, NSStringFromClass(AD.self))
           SWIFT
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          xcrun -sdk iphoneos swiftc -target arm64-apple-ios15.0 -framework UIKit -framework WebKit -o Payload/QwenStudio.app/QwenStudio app.swift
+          xcrun -sdk iphoneos swiftc -target arm64-apple-ios15.0 -framework UIKit -framework WebKit -framework AVFoundation -o Payload/QwenStudio.app/QwenStudio app.swift
           chmod +x Payload/QwenStudio.app/QwenStudio
           cat > Payload/QwenStudio.app/Info.plist <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
@@ -114,6 +134,10 @@ jobs:
           <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
           <key>UIViewControllerBasedStatusBarAppearance</key><true/>
           <key>CFBundleIcons</key><dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string></array><key>CFBundleIconName</key><string>AppIcon</string></dict></dict>
+          <key>NSMicrophoneUsageDescription</key><string>Qwen Studio needs microphone access for voice input features.</string>
+          <key>NSCameraUsageDescription</key><string>Qwen Studio needs camera access for image upload features.</string>
+          <key>NSLocationWhenInUseUsageDescription</key><string>Qwen Studio needs location access for relevant AI features.</string>
+          <key>NSPhotoLibraryUsageDescription</key><string>Qwen Studio needs photo library access for image uploads.</string>
           </dict></plist>
           PLIST
           printf 'APPL????' > Payload/QwenStudio.app/PkgInfo
