@@ -1,4 +1,4 @@
-name: Build QwenStudio
+name: BuildQwenStudio
 
 on: workflow_dispatch
 
@@ -6,131 +6,118 @@ jobs:
   build:
     runs-on: macos-latest
     steps:
-      - name: Build IPA
-        run: |
-          set -e
-          set -x
-          
+      - run: |
+          set -ex
           mkdir -p Payload/QwenStudio.app
-          
           cat > app.swift <<'SWIFT'
           import UIKit
           import WebKit
-          
-          class ViewController: UIViewController, WKScriptMessageHandler {
-              var webView: WKWebView!
-              var statusBarIsDark = false
-              
+
+          class VC: UIViewController, WKScriptMessageHandler {
+              var wv: WKWebView!
+              var lastColor = "255,255,255"
+              var stableCount = 0
+              var sb = false
+
               override var preferredStatusBarStyle: UIStatusBarStyle {
-                  return statusBarIsDark ? .lightContent : .darkContent
+                  return sb ? .lightContent : .darkContent
               }
-              
+
               override func viewDidLoad() {
                   super.viewDidLoad()
-                  
-                  let config = WKWebViewConfiguration()
-                  config.userContentController.add(self, name: "themeHandler")
-                  
-                  let js = """
-                  (function() {
-                      function sample() {
-                          var color = '255,255,255';
-                          var el = null;
-                          try {
-                              el = document.elementFromPoint(window.innerWidth / 2, 2);
-                          } catch(e) {}
-                          if (!el) el = document.body || document.documentElement;
-                          
-                          var bg = window.getComputedStyle(el).backgroundColor;
-                          var m = bg.match(/(\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)/);
-                          if (m) {
-                              color = m[1] + ',' + m[2] + ',' + m[3];
-                          } else {
-                              var parent = el.parentElement;
-                              while (parent) {
-                                  var pbg = window.getComputedStyle(parent).backgroundColor;
-                                  var pm = pbg.match(/(\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)/);
-                                  if (pm) {
-                                      color = pm[1] + ',' + pm[2] + ',' + pm[3];
-                                      break;
-                                  }
-                                  parent = parent.parentElement;
-                              }
-                          }
-                          if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.themeHandler) {
-                              window.webkit.messageHandlers.themeHandler.postMessage(color);
-                          }
+                  let c = WKWebViewConfiguration()
+                  c.userContentController.add(self, name: "t")
+                  let j = """
+                  (function(){
+                    var last='';
+                    var stable=0;
+                    function getColor(){
+                      var el=document.querySelector('header,nav,.header,.navbar,.app-header,.top-bar,#header,[class*=header]');
+                      if(!el) el=document.body;
+                      if(!el) el=document.documentElement;
+                      var bg=window.getComputedStyle(el).backgroundColor;
+                      var m=bg.match(/(\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)/);
+                      return m?m[1]+','+m[2]+','+m[3]:'255,255,255';
+                    }
+                    function send(){
+                      var color=getColor();
+                      if(color===last){stable++;}else{stable=0;last=color;}
+                      if(stable>=2){
+                        if(window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.t){
+                          window.webkit.messageHandlers.t.postMessage(color);
+                        }
                       }
-                      sample();
-                      setInterval(sample, 200);
-                      var observer = new MutationObserver(sample);
-                      observer.observe(document.documentElement, { attributes: true, childList: true, subtree: true });
-                  })();
+                    }
+                    send();
+                    setInterval(send,300);
+                    var observer=new MutationObserver(send);
+                    observer.observe(document.documentElement,{attributes:true,childList:true,subtree:true});
+                  })()
                   """
-                  
-                  let userScript = WKUserScript(source: js, injectionTime: .atDocumentEnd, forMainFrameOnly: false)
-                  config.userContentController.addUserScript(userScript)
-                  
-                  webView = WKWebView(frame: .zero, configuration: config)
-                  webView.translatesAutoresizingMaskIntoConstraints = false
-                  webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
-                  
-                  view.addSubview(webView)
+                  c.userContentController.addUserScript(WKUserScript(source: j, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
+                  wv = WKWebView(frame: .zero, configuration: c)
+                  wv.translatesAutoresizingMaskIntoConstraints = false
+                  wv.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
+                  view.addSubview(wv)
                   NSLayoutConstraint.activate([
-                      webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-                      webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-                      webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-                      webView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+                      wv.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+                      wv.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                      wv.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                      wv.bottomAnchor.constraint(equalTo: view.bottomAnchor)
                   ])
-                  
-                  if let url = URL(string: "https://chat.qwen.ai/") {
-                      webView.load(URLRequest(url: url))
-                  }
+                  wv.load(URLRequest(url: URL(string: "https://chat.qwen.ai/")!))
               }
-              
-              func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-                  if let rgb = message.body as? String {
-                      let components = rgb.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
-                      if components.count == 3 {
-                          let r = CGFloat(components[0]) / 255.0
-                          let g = CGFloat(components[1]) / 255.0
-                          let b = CGFloat(components[2]) / 255.0
-                          
-                          view.backgroundColor = UIColor(red: r, green: g, blue: b, alpha: 1.0)
-                          
-                          let luminance = (0.299 * CGFloat(components[0]) + 0.587 * CGFloat(components[1]) + 0.114 * CGFloat(components[2])) / 255.0
-                          let newIsDark = luminance < 0.5
-                          if newIsDark != statusBarIsDark {
-                              statusBarIsDark = newIsDark
-                              setNeedsStatusBarAppearanceUpdate()
+
+              func userContentController(_ u: WKUserContentController, didReceive m: WKScriptMessage) {
+                  if let r = m.body as? String {
+                      if r == lastColor {
+                          stableCount += 1
+                      } else {
+                          stableCount = 0
+                          lastColor = r
+                      }
+                      if stableCount >= 1 {
+                          let p = r.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: CharacterSet.whitespaces)) }
+                          if p.count == 3 {
+                              let R = CGFloat(p[0]) / 255.0
+                              let G = CGFloat(p[1]) / 255.0
+                              let B = CGFloat(p[2]) / 255.0
+                              view.backgroundColor = UIColor(red: R, green: G, blue: B, alpha: 1.0)
+                              let l = (0.299 * CGFloat(p[0]) + 0.587 * CGFloat(p[1]) + 0.114 * CGFloat(p[2])) / 255.0
+                              // Hysteresis: dead zone prevents flickering
+                              let newDark: Bool
+                              if l < 0.45 { newDark = true }
+                              else if l > 0.55 { newDark = false }
+                              else { newDark = sb } // keep current if in dead zone
+                              if newDark != sb {
+                                  sb = newDark
+                                  setNeedsStatusBarAppearanceUpdate()
+                              }
                           }
                       }
                   }
               }
           }
-          
-          class AppDelegate: UIResponder, UIApplicationDelegate {
-              var window: UIWindow?
-              func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-                  window = UIWindow(frame: UIScreen.main.bounds)
-                  window?.rootViewController = ViewController()
-                  window?.makeKeyAndVisible()
+
+          class AD: UIResponder, UIApplicationDelegate {
+              var w: UIWindow?
+              func application(_ a: UIApplication, didFinishLaunchingWithOptions l: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+                  w = UIWindow(frame: UIScreen.main.bounds)
+                  w?.rootViewController = VC()
+                  w?.makeKeyAndVisible()
                   return true
               }
           }
-          
-          UIApplicationMain(CommandLine.argc, CommandLine.unsafeArgv, nil, NSStringFromClass(AppDelegate.self))
+
+          UIApplicationMain(CommandLine.argc, CommandLine.unsafeArgv, nil, NSStringFromClass(AD.self))
           SWIFT
-          
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           xcrun -sdk iphoneos swiftc -target arm64-apple-ios15.0 -framework UIKit -framework WebKit -o Payload/QwenStudio.app/QwenStudio app.swift
           chmod +x Payload/QwenStudio.app/QwenStudio
-          
           cat > Payload/QwenStudio.app/Info.plist <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
+          <plist version="1.0"><dict>
           <key>CFBundleExecutable</key><string>QwenStudio</string>
           <key>CFBundleIdentifier</key><string>com.qwen.studio</string>
           <key>CFBundleName</key><string>Qwen Studio</string>
@@ -143,15 +130,11 @@ jobs:
           <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
           <key>UIViewControllerBasedStatusBarAppearance</key><true/>
           <key>CFBundleIcons</key><dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string></array><key>CFBundleIconName</key><string>AppIcon</string></dict></dict>
-          </dict>
-          </plist>
+          </dict></plist>
           PLIST
-          
           printf 'APPL????' > Payload/QwenStudio.app/PkgInfo
           zip -r QwenStudio.ipa Payload
-
       - uses: actions/upload-artifact@v4
         with:
           name: QwenStudio-IPA
           path: QwenStudio.ipa
-          retention-days: 5
