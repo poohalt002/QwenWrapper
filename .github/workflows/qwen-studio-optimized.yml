@@ -1,0 +1,320 @@
+name: Build Qwen Studio
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - run: |
+          set -ex
+          mkdir -p Payload/QwenStudio.app
+
+          cat > app.swift <<'SWIFT'
+          import UIKit
+          import WebKit
+          import AVFoundation
+
+          class VC: UIViewController, WKScriptMessageHandler, WKUIDelegate, WKNavigationDelegate {
+              var wv: WKWebView!
+              var lastColor = "255,255,255"
+              var stableCount = 0
+              var sb = false
+
+              override var preferredStatusBarStyle: UIStatusBarStyle {
+                  return sb ? .lightContent : .darkContent
+              }
+
+              override func viewDidLoad() {
+                  super.viewDidLoad()
+                  view.backgroundColor = UIColor.white
+                  sb = false
+                  AVCaptureDevice.requestAccess(for: .audio) { _ in }
+
+                  let c = WKWebViewConfiguration()
+                  c.userContentController.add(self, name: "themeHandler")
+                  c.allowsInlineMediaPlayback = true
+                  c.mediaTypesRequiringUserActionForPlayback = []
+                  c.preferences.javaScriptCanOpenWindowsAutomatically = true
+                  c.processPool = WKProcessPool()
+
+                  let selectionScript = WKUserScript(
+                      source: "document.documentElement.style.webkitUserSelect='text';",
+                      injectionTime: .atDocumentStart,
+                      forMainFrameOnly: true
+                  )
+                  c.userContentController.addUserScript(selectionScript)
+
+                  let themeJS = ""
+                  (function(){
+                    'use strict';
+                    var lastSent='255,255,255';
+                    var lastSentTime=0;
+                    var rafId=null;
+                    var isVisible=true;
+                    var pendingColor=null;
+                    
+                    function getTopColor(){
+                      try{
+                        var selectors=['header','nav','[class*=header]','.app-header','.navbar','[class*=top-bar]','[class*=app-bar]'];
+                        for(var i=0;i<selectors.length;i++){
+                          var el=document.querySelector(selectors[i]);
+                          if(el){
+                            var rect=el.getBoundingClientRect();
+                            if(rect.top<=2&&rect.height>15){
+                              var c=getComputedStyle(el).backgroundColor;
+                              var m=c.match(/(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+                              if(m&&c!=='rgba(0, 0, 0, 0)'&&c!=='transparent') return m[1]+','+m[2]+','+m[3];
+                            }
+                          }
+                        }
+                        var body=document.body;
+                        if(body){
+                          var bc=getComputedStyle(body).backgroundColor;
+                          var bm=bc.match(/(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+                          if(bm) return bm[1]+','+bm[2]+','+bm[3];
+                        }
+                        return '255,255,255';
+                      }catch(e){ return '255,255,255'; }
+                    }
+                    
+                    function sendColor(){
+                      if(!isVisible) return;
+                      var now=Date.now();
+                      if(now-lastSentTime<500) return;
+                      var color=getTopColor();
+                      if(color!==lastSent){
+                        lastSent=color;
+                        lastSentTime=now;
+                        if(window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.themeHandler){
+                          window.webkit.messageHandlers.themeHandler.postMessage(color);
+                        }
+                      }
+                    }
+                    
+                    function onFrame(){
+                      if(pendingColor){
+                        sendColor();
+                        pendingColor=null;
+                      }
+                      rafId=null;
+                    }
+                    
+                    function scheduleUpdate(){
+                      if(!rafId){
+                        rafId=requestAnimationFrame(onFrame);
+                      }
+                      pendingColor=true;
+                    }
+                    
+                    var obs=new MutationObserver(function(muts){
+                      scheduleUpdate();
+                    });
+                    
+                    var headerEl=document.querySelector('header')||document.querySelector('nav')||document.body;
+                    if(headerEl){
+                      obs.observe(headerEl,{attributes:true,attributeFilter:['class','style']});
+                    }
+                    
+                    if(document.body){
+                      obs.observe(document.body,{attributes:true,attributeFilter:['class']});
+                    }
+                    
+                    document.addEventListener('visibilitychange',function(){
+                      isVisible=!document.hidden;
+                    });
+                    
+                    sendColor();
+                    setInterval(sendColor,2000);
+                  })();
+                  ""
+
+                  let bannerJS = ""
+                  (function(){
+                    'use strict';
+                    var hidden=new Set();
+                    function hideBanners(){
+                      var selectors=['.share-logo-content','[class*=download-app]','[class*=app-banner]','.mobile-banner','[id*=appBanner]'];
+                      for(var i=0;i<selectors.length;i++){
+                        var els=document.querySelectorAll(selectors[i]);
+                        for(var j=0;j<els.length;j++){
+                          var el=els[j];
+                          if(!hidden.has(el)){
+                            el.style.display='none';
+                            el.style.visibility='hidden';
+                            el.style.height='0';
+                            el.style.overflow='hidden';
+                            hidden.add(el);
+                          }
+                        }
+                      }
+                    }
+                    hideBanners();
+                    var obs=new MutationObserver(function(muts){
+                      var shouldHide=false;
+                      for(var i=0;i<muts.length;i++){
+                        for(var j=0;j<muts[i].addedNodes.length;j++){
+                          var node=muts[i].addedNodes[j];
+                          if(node.nodeType===1){
+                            var cls=node.className||'';
+                            var id=node.id||'';
+                            if(cls.includes('share')||cls.includes('banner')||cls.includes('download')||id.includes('app')){
+                              shouldHide=true;break;
+                            }
+                          }
+                        }
+                        if(shouldHide) break;
+                      }
+                      if(shouldHide) hideBanners();
+                    });
+                    obs.observe(document.documentElement,{childList:true,subtree:true});
+                  })();
+                  ""
+
+                  let perfJS = ""
+                  (function(){
+                    'use strict';
+                    var origAnimate=Element.prototype.animate;
+                    if(origAnimate){
+                      Element.prototype.animate=function(keyframes,options){
+                        if(typeof options==='object'&&options!==null){
+                          options={...options};
+                          if(options.duration&&options.duration>500) options.duration=300;
+                          delete options.composite;
+                          delete options.pseudoElement;
+                          delete options.iterationComposite;
+                        }
+                        return origAnimate.call(this,keyframes,options);
+                      };
+                    }
+                    
+                    document.documentElement.style.overscrollBehavior='none';
+                    
+                    var touchStyle=document.createElement('style');
+                    touchStyle.textContent='*{-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;touch-action:manipulation}';
+                    document.head.appendChild(touchStyle);
+                    
+                    var origAppendChild=Element.prototype.appendChild;
+                    Element.prototype.appendChild=function(node){
+                      if(node.tagName==='SCRIPT'){
+                        var src=node.src||'';
+                        if(src.includes('analytics')||src.includes('tracking')||src.includes('metrics')){
+                          node.defer=true;
+                          node.async=true;
+                        }
+                      }
+                      return origAppendChild.call(this,node);
+                    };
+                  })();
+                  ""
+
+                  c.userContentController.addUserScript(WKUserScript(source: themeJS, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+                  c.userContentController.addUserScript(WKUserScript(source: bannerJS, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
+                  c.userContentController.addUserScript(WKUserScript(source: perfJS, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+
+                  wv = WKWebView(frame: .zero, configuration: c)
+                  wv.translatesAutoresizingMaskIntoConstraints = false
+                  wv.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
+                  wv.uiDelegate = self
+                  wv.navigationDelegate = self
+                  wv.scrollView.contentInsetAdjustmentBehavior = .never
+                  wv.scrollView.keyboardDismissMode = .interactive
+                  wv.scrollView.decelerationRate = .normal
+                  wv.allowsBackForwardNavigationGestures = false
+
+                  if #available(iOS 17.0, *) {
+                      wv.isInspectable = true
+                  }
+
+                  view.addSubview(wv)
+                  NSLayoutConstraint.activate([
+                      wv.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+                      wv.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                      wv.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                      wv.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+                  ])
+
+                  let req = URLRequest(url: URL(string: "https://chat.qwen.ai/")!, timeoutInterval: 30)
+                  wv.load(req)
+              }
+
+              func userContentController(_ u: WKUserContentController, didReceive m: WKScriptMessage) {
+                  if let rgb = m.body as? String {
+                      let p = rgb.split(separator: ",").compactMap { Int($0) }
+                      guard p.count == 3 else { return }
+                      let R = CGFloat(p[0]) / 255.0
+                      let G = CGFloat(p[1]) / 255.0
+                      let B = CGFloat(p[2]) / 255.0
+
+                      DispatchQueue.main.async { [weak self] in
+                          guard let self = self else { return }
+                          self.view.backgroundColor = UIColor(red: R, green: G, blue: B, alpha: 1.0)
+                          let luminance = (0.299*CGFloat(p[0]) + 0.587*CGFloat(p[1]) + 0.114*CGFloat(p[2])) / 255.0
+                          if luminance < 0.45 {
+                              self.sb = true
+                          } else if luminance > 0.55 {
+                              self.sb = false
+                          }
+                          self.setNeedsStatusBarAppearanceUpdate()
+                      }
+                  }
+              }
+
+              func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) { completionHandler() }
+              func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) { completionHandler(true) }
+              func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) { completionHandler(defaultText) }
+
+              func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+              }
+
+              deinit {
+                  wv?.stopLoading()
+                  wv?.configuration.userContentController.removeAllScriptMessageHandlers()
+              }
+          }
+
+          class AD: UIResponder, UIApplicationDelegate {
+              var w: UIWindow?
+              func application(_ a: UIApplication, didFinishLaunchingWithOptions l: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+                  w = UIWindow(frame: UIScreen.main.bounds)
+                  w?.rootViewController = VC()
+                  w?.makeKeyAndVisible()
+                  return true
+              }
+          }
+
+          UIApplicationMain(CommandLine.argc, CommandLine.unsafeArgv, nil, NSStringFromClass(AD.self))
+          SWIFT
+
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          xcrun -sdk iphoneos swiftc -target arm64-apple-ios15.0 -framework UIKit -framework WebKit -framework AVFoundation -o Payload/QwenStudio.app/QwenStudio app.swift
+          chmod +x Payload/QwenStudio.app/QwenStudio
+
+          cat > Payload/QwenStudio.app/Info.plist <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+          <key>CFBundleExecutable</key><string>QwenStudio</string>
+          <key>CFBundleIdentifier</key><string>com.qwen.studio</string>
+          <key>CFBundleName</key><string>Qwen Studio</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>CFBundleShortVersionString</key><string>1.0</string>
+          <key>CFBundleVersion</key><string>1</string>
+          <key>LSRequiresIPhoneOS</key><true/>
+          <key>MinimumOSVersion</key><string>15.0</string>
+          <key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>
+          <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
+          <key>UIViewControllerBasedStatusBarAppearance</key><true/>
+          <key>CFBundleIcons</key><dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string></array><key>CFBundleIconName</key><string>AppIcon</string></dict></dict>
+          <key>NSMicrophoneUsageDescription</key><string>Qwen Studio needs microphone for voice input.</string>
+          <key>NSCameraUsageDescription</key><string>Qwen Studio needs camera for image uploads.</string>
+          <key>NSLocationWhenInUseUsageDescription</key><string>Qwen Studio needs location for AI features.</string>
+          <key>NSPhotoLibraryUsageDescription</key><string>Qwen Studio needs photo library for image uploads.</string>
+          </dict></plist>
+          PLIST
+
+          printf 'APPL????' > Payload/QwenStudio.app/PkgInfo
+          zip -r QwenStudio.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: QwenStudio-IPA
+          path: QwenStudio.ipa
